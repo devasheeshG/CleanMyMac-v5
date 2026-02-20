@@ -4,19 +4,16 @@ Unlock all CleanMyMac X's features for free!
 
 Updated to version 4.11.4 (App Store) - Intel Chip
 
-Apple Silicon is not supported.
+> [!NOTE]
+> The script now automatically detects both **CleanMyMac X (MAS)** and **CleanMyMac 5**. However, the current patching logic is only verified for version **4.11.4**.
 
 ## How to use
 
 ```
 $ chmod u+x patch.py
 $ sudo ./patch.py
-Patching /Applications/CleanMyMac-MAS.app/Contents/MacOS/CleanMyMac-MAS...
-Patching /Applications/CleanMyMac-MAS.app/Contents/Library/LoginItems/CleanMyMac-MAS Menu.app/Contents/MacOS/CleanMyMac-MAS Menu...
-Re-signing /Applications/CleanMyMac-MAS.app...
-/Applications/CleanMyMac-MAS.app: replacing existing signature
-/Applications/CleanMyMac-MAS.app: valid on disk
-/Applications/CleanMyMac-MAS.app: satisfies its Designated Requirement
+Patching /Applications/CleanMyMac_5.app/Contents/MacOS/CleanMyMac_5... (or -MAS.app)
+...
 Enjoy!
 ```
 

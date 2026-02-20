@@ -14,18 +14,30 @@ def apply_patch(binary, offset, patch):
         binary[offset + i] = patch[i]
 
 def main():
-    app_path = Path('/Applications/CleanMyMac-MAS.app')
-    binary_path = app_path.joinpath('Contents/MacOS/CleanMyMac-MAS')
+    # Support both version 4 (MAS) and version 5 paths
+    app_path_v4 = Path('/Applications/CleanMyMac-MAS.app')
+    app_path_v5 = Path('/Applications/CleanMyMac_5.app')
 
-    menu_app_path = app_path.joinpath('Contents/Library/LoginItems/CleanMyMac-MAS Menu.app')
-    menu_binary_path = menu_app_path.joinpath('Contents/MacOS/CleanMyMac-MAS Menu')
+    if app_path_v4.exists():
+        app_path = app_path_v4
+        binary_path = app_path.joinpath('Contents/MacOS/CleanMyMac-MAS')
+        menu_app_path = app_path.joinpath('Contents/Library/LoginItems/CleanMyMac-MAS Menu.app')
+        menu_binary_path = menu_app_path.joinpath('Contents/MacOS/CleanMyMac-MAS Menu')
+    elif app_path_v5.exists():
+        app_path = app_path_v5
+        binary_path = app_path.joinpath('Contents/MacOS/CleanMyMac_5')
+        menu_app_path = app_path.joinpath('Contents/MacOS/CleanMyMac_5_Updater.app')
+        menu_binary_path = menu_app_path.joinpath('Contents/MacOS/CleanMyMac_5_Updater')
+    else:
+        print('CleanMyMac X (MAS or v5) not found. Please make sure you have installed it from the AppStore or MacPaw.')
+        return
 
     if not binary_path.is_file():
-        app_not_found('CleanMyMac X')
+        app_not_found(f'Binary at {binary_path}')
         return
 
     if not menu_binary_path.is_file():
-        app_not_found('Menu')
+        app_not_found(f'Menu binary at {menu_binary_path}')
         return
 
     print(f"Patching {binary_path}...")
