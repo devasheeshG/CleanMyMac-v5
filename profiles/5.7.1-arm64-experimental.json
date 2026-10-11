@@ -1,0 +1,23 @@
+{
+  "version": "5.7.1",
+  "build": "50701.0.2609301754",
+  "bundle_id": "com.macpaw.CleanMyMac5",
+  "status": "experimental",
+  "architecture": "arm64",
+  "binary_sha256": "e507ea1323a090f6218f233fa682b33862a7a5efcdda8d102a91c9f5906db5f1",
+  "validation": {
+    "signature_check": "passed_on_test_copy",
+    "startup_without_entitlements": "alive_for_30_seconds",
+    "startup_with_original_entitlements": "AMFI_rejected_minus_424",
+    "activation_and_paid_features": "not_verified",
+    "cleanup_and_permissions": "not_verified",
+    "intel": "not_supported"
+  },
+  "patches": [
+    {"name": "ActivationManagerMPA activation getter candidate", "file_offset": 7160652, "before": "ffc300d1f44f01a9", "after": "20008052c0035fd6"},
+    {"name": "Activation subject initial value candidate A", "file_offset": 7161548, "before": "68024239", "after": "28008052"},
+    {"name": "Activation subject initial value candidate B", "file_offset": 7162560, "before": "68024239", "after": "28008052"},
+    {"name": "Activation callback subject value candidate", "file_offset": 7167596, "before": "68020012", "after": "28008052"},
+    {"name": "Activation update subject value candidate", "file_offset": 7184144, "before": "88020012", "after": "28008052"}
+  ]
+}

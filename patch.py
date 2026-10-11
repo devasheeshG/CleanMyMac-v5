@@ -1,103 +1,109 @@
 #!/usr/bin/env python3
+"""Inspect by default; create an explicitly requested experimental app copy."""
 
+import argparse
+import ctypes
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
-from os import system
 
-def app_not_found(name):
-    print(f'{name} not found. Please make sure you have installed the latest version of CleanMyMac X from the AppStore.')
+from compatibility import CompatibilityError, find_app, inspect_app, load_profile, patched_bytes
 
-def function_not_found(name):
-    print(f'FAILED: Function `{name}` not found.')
 
-def apply_patch(binary, offset, patch):
-    for i in range(len(patch)):
-        binary[offset + i] = patch[i]
+def run(command):
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode:
+        raise CompatibilityError('Command failed: ' + command[0] + '\n' + result.stderr.strip())
 
-def main():
-    # Support both version 4 (MAS) and version 5 paths
-    app_path_v4 = Path('/Applications/CleanMyMac-MAS.app')
-    app_path_v5 = Path('/Applications/CleanMyMac_5.app')
 
-    if app_path_v4.exists():
-        app_path = app_path_v4
-        binary_path = app_path.joinpath('Contents/MacOS/CleanMyMac-MAS')
-        menu_app_path = app_path.joinpath('Contents/Library/LoginItems/CleanMyMac-MAS Menu.app')
-        menu_binary_path = menu_app_path.joinpath('Contents/MacOS/CleanMyMac-MAS Menu')
-    elif app_path_v5.exists():
-        app_path = app_path_v5
-        binary_path = app_path.joinpath('Contents/MacOS/CleanMyMac_5')
-        menu_app_path = app_path.joinpath('Contents/MacOS/CleanMyMac_5_Updater.app')
-        menu_binary_path = menu_app_path.joinpath('Contents/MacOS/CleanMyMac_5_Updater')
-    else:
-        print('CleanMyMac X (MAS or v5) not found. Please make sure you have installed it from the AppStore or MacPaw.')
-        return
+def create_copy(app, output):
+    """Stage, patch, and sign a new bundle; never overwrite an existing app."""
+    if platform.system() != 'Darwin' or platform.machine() != 'arm64':
+        raise CompatibilityError('Experimental application requires native ARM64 macOS.')
+    output = output.expanduser().resolve()
+    if output.suffix != '.app' or output.exists():
+        raise CompatibilityError('Output must be a new, nonexistent .app path.')
+    if app == output or app in output.parents or output in app.parents:
+        raise CompatibilityError('Output must be separate from the source app.')
+    profile = load_profile()
+    patched_bytes((app / 'Contents/MacOS/CleanMyMac_5').read_bytes(), profile)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    workspace = Path(tempfile.mkdtemp(prefix='.cleanmymac-stage-', dir=output.parent))
+    staged = workspace / output.name
+    try:
+        run(['ditto', str(app), str(staged)])
+        run(['codesign', '--verify', '--deep', '--strict', str(staged)])
+        binary = staged / 'Contents/MacOS/CleanMyMac_5'
+        replacement = patched_bytes(binary.read_bytes(), profile)
+        stat = binary.stat()
+        pending = binary.with_name(binary.name + '.pending')
+        pending.write_bytes(replacement)
+        os.chmod(pending, stat.st_mode & 0o777)
+        os.replace(pending, binary)
+        # Restricted vendor entitlements are rejected with an ad-hoc signature.
+        # Dropping them permits startup, but does not preserve all functionality.
+        run(['codesign', '--force', '--sign', '-', '--timestamp=none', str(staged)])
+        run(['codesign', '--verify', '--deep', '--strict', str(staged)])
+        # Atomic no-clobber publication on macOS; never replace a user's bundle.
+        libc = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True)
+        rename = libc.renamex_np
+        rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        rename.restype = ctypes.c_int
+        if rename(os.fsencode(staged), os.fsencode(output), 4):
+            raise OSError(ctypes.get_errno(), 'Cannot publish staged app without replacing an existing path')
+    finally:
+        shutil.rmtree(workspace)
+    return output
 
-    if not binary_path.is_file():
-        app_not_found(f'Binary at {binary_path}')
-        return
 
-    if not menu_binary_path.is_file():
-        app_not_found(f'Menu binary at {menu_binary_path}')
-        return
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--app', type=Path, help='Source app; defaults to /Applications/CleanMyMac_5.app')
+    parser.add_argument('--check', action='store_true', help='Read-only compatibility check (default)')
+    parser.add_argument('--json', action='store_true', help='Print the compatibility report as JSON')
+    parser.add_argument('--apply', action='store_true', help='Create a separate experimental app copy')
+    parser.add_argument('--experimental', action='store_true', help='Acknowledge unverified feature behavior')
+    parser.add_argument('--output', type=Path, help='New .app path; existing paths are never replaced')
+    args = parser.parse_args(argv)
+    if args.check and args.apply:
+        parser.error('--check and --apply are mutually exclusive')
+    if args.apply and (not args.experimental or args.output is None):
+        parser.error('--apply requires --experimental and --output /new/path.app')
+    if not args.apply and (args.output is not None or args.experimental):
+        parser.error('--experimental and --output require --apply')
+    try:
+        app = find_app(args.app)
+        report = inspect_app(app)
+        if args.apply:
+            if not report['experimental_preflight_passed']:
+                raise CompatibilityError(report['reason'])
+            output = create_copy(app, args.output)
+            report.update(output=str(output), signature_check='passed',
+                          entitlements_preserved=False,
+                          startup_and_features_validated_by_this_run=False)
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            print('CleanMyMac', report['version'], 'build', report['build'])
+            print('Profile:', report['profile_status'])
+            print(report['reason'])
+            if args.apply:
+                print('Experimental app copy:', report['output'])
+                print('Vendor entitlements were not retained. Activation, features, and permissions remain unverified.')
+                print('Source app unchanged. This command does not launch or install over it.')
+        return 0 if report['experimental_preflight_passed'] else 2
+    except (CompatibilityError, OSError) as error:
+        if args.json:
+            print(json.dumps({'error': str(error)}))
+        else:
+            print('ERROR:', error, file=sys.stderr)
+        return 1
 
-    print(f"Patching {binary_path}...")
-
-    with open(binary_path, 'rb+') as file:
-        binary = bytearray(file.read())
-
-        # Function: -[CMMASLimitation isExceeded]
-        # Signature: 55 48 89 E5 48 8B 35 B2 D0 64 00 FF 15 1C 5E 55 00 31 C9 48 85 C0 0F 9E C1 89 C8 5D C3
-        # Patch: 48 31 C0 C3
-
-        offset = binary.find(b'\x55\x48\x89\xE5\x48\x8B\x35\xB2\xD0\x64\x00\xFF\x15\x1C\x5E\x55\x00\x31\xC9\x48\x85\xC0\x0F\x9E\xC1\x89\xC8\x5D\xC3')
-
-        if offset == -1:
-            function_not_found('-[CMMASLimitation isExceeded]')
-            return
-
-        apply_patch(binary, offset, b'\x48\x31\xC0\xC3')
-
-        # Function: -[_TtC10CleanMyMac20ModulesListViewModel isUnlockFullVersionButtonHidden]
-        # Signature: 55 48 89 E5 E8 77 0E 00 00 0F B6 C0 83 E0 01 5D C3
-        # Patch: 48 C7 C0 01 00 00 00 C3
-
-        offset = binary.find(b'\x55\x48\x89\xE5\xE8\x77\x0E\x00\x00\x0F\xB6\xC0\x83\xE0\x01\x5D\xC3')
-
-        if offset == -1:
-            function_not_found('-[_TtC10CleanMyMac20ModulesListViewModel isUnlockFullVersionButtonHidden]')
-            return
-
-        apply_patch(binary, offset, b'\x48\xC7\xC0\x01\x00\x00\x00\xC3')
-
-        file.seek(0)
-        file.write(binary)
-
-    print(f"Patching {menu_binary_path}...")
-
-    with open(menu_binary_path, 'rb+') as file:
-        binary = bytearray(file.read())
-
-        # Function: -[CMMASMenuLimitation isExceeded]
-        # Signature: 55 48 89 E5 48 8B 35 99 15 2E 00 FF 15 7B 68 27 00 31 C9 48 85 C0 0F 9E C1 89 C8 5D C3
-        # Patch: 48 31 C0 C3
-
-        offset = binary.find(b'\x55\x48\x89\xE5\x48\x8B\x35\x99\x15\x2E\x00\xFF\x15\x7B\x68\x27\x00\x31\xC9\x48\x85\xC0\x0F\x9E\xC1\x89\xC8\x5D\xC3')
-
-        if offset == -1:
-            function_not_found('-[CMMASMenuLimitation isExceeded]')
-            return
-
-        apply_patch(binary, offset, b'\x48\x31\xC0\xC3')
-
-        file.seek(0)
-        file.write(binary)
-
-    print(f'Re-signing {app_path}...')
-
-    system(f'codesign -fs - {app_path} --deep')
-    system(f'codesign --verify {app_path} --verbose')
-
-    print('Enjoy!')
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

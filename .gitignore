@@ -1,2 +1,9 @@
 .DS_Store
+__pycache__/
+*.py[cod]
+*.app/
+local-build/
+local-results/
+*.log
+.venv/
 
