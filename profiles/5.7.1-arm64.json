@@ -1,0 +1,47 @@
+{
+  "version": "5.7.1",
+  "build": "50701.0.2609301754",
+  "bundle_id": "com.macpaw.CleanMyMac5",
+  "status": "activation_ui_verified",
+  "architecture": "arm64",
+  "binary_sha256": "e507ea1323a090f6218f233fa682b33862a7a5efcdda8d102a91c9f5906db5f1",
+  "validation": {
+    "main_window": "opened_with_local_data_adapter",
+    "activation_menu": "Update License and Activation info observed",
+    "pro_features": "not_exhaustively_verified",
+    "prior_candidate": "superseded_wrong_publisher_and_protected_container",
+    "intel": "not_supported"
+  },
+  "patches": [
+    {
+      "name": "ActivationManagerMPA isActivated getter",
+      "file_offset": 7158972,
+      "before": "ffc300d1f44f01a9",
+      "after": "20008052c0035fd6"
+    },
+    {
+      "name": "Activation subject initial value A",
+      "file_offset": 7161444,
+      "before": "68fe4139",
+      "after": "28008052"
+    },
+    {
+      "name": "Activation subject initial value B",
+      "file_offset": 7162456,
+      "before": "68fe4139",
+      "after": "28008052"
+    },
+    {
+      "name": "Activation result Bool calculation",
+      "file_offset": 7183176,
+      "before": "f7020012",
+      "after": "37008052"
+    },
+    {
+      "name": "Skip inactive-state activation subject reset",
+      "file_offset": 7188836,
+      "before": "c82300b0",
+      "after": "07000014"
+    }
+  ]
+}

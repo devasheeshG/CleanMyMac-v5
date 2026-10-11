@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_APPS = (Path('/Applications/CleanMyMac_5.app'), Path('/Applications/CleanMyMac-MAS.app'))
+DEFAULT_APPS = (Path('/Applications/CleanMyMac.app'), Path('/Applications/CleanMyMac_5.app'), Path('/Applications/CleanMyMac-MAS.app'))
 
 
 class CompatibilityError(ValueError):
@@ -16,7 +16,7 @@ class CompatibilityError(ValueError):
 
 
 def load_profile():
-    return json.loads((ROOT / 'profiles' / '5.7.1-arm64-experimental.json').read_text())
+    return json.loads((ROOT / 'profiles' / '5.7.1-arm64.json').read_text())
 
 
 def find_app(path=None):
@@ -61,7 +61,7 @@ def arm64_slice(data):
 def patched_bytes(data, profile):
     """Validate the complete preimage before changing any byte in memory."""
     if hashlib.sha256(data).hexdigest() != profile['binary_sha256']:
-        raise CompatibilityError('Binary SHA-256 does not match the exact experimental build.')
+        raise CompatibilityError('Binary SHA-256 does not match the exact supported build.')
     start, size = arm64_slice(data)
     intervals = []
     for patch in profile['patches']:
@@ -106,7 +106,7 @@ def inspect_app(app):
         'bundle_id': info.get('CFBundleIdentifier'),
         'binary_sha256': hashlib.sha256(data).hexdigest(),
         'profile_status': 'unsupported',
-        'experimental_preflight_passed': False,
+        'preflight_passed': False,
         'feature_validation': 'not_verified',
     }
     if any(report[key] != profile[key] for key in ('version', 'build', 'bundle_id')):
@@ -117,7 +117,7 @@ def inspect_app(app):
     except CompatibilityError as error:
         report['reason'] = str(error)
         return report
-    report.update(profile_status='experimental', experimental_preflight_passed=True,
+    report.update(profile_status=profile['status'], preflight_passed=True,
                   patch_sites=len(profile['patches']),
-                  reason='Exact preimage matches. Startup observed without entitlements; features unverified.')
+                  reason='Exact preimage matches the corrected patch profile. Functional validation is required.')
     return report

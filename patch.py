@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect by default; create an explicitly requested experimental app copy."""
+"""Inspect by default; create an explicitly requested patched app copy."""
 
 import argparse
 import ctypes
@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 
 from compatibility import CompatibilityError, find_app, inspect_app, load_profile, patched_bytes
+from local_adapter import inject_adapter
 
 
 def run(command):
@@ -24,7 +25,7 @@ def run(command):
 def create_copy(app, output):
     """Stage, patch, and sign a new bundle; never overwrite an existing app."""
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
-        raise CompatibilityError('Experimental application requires native ARM64 macOS.')
+        raise CompatibilityError('Patching requires native ARM64 macOS.')
     output = output.expanduser().resolve()
     if output.suffix != '.app' or output.exists():
         raise CompatibilityError('Output must be a new, nonexistent .app path.')
@@ -39,12 +40,17 @@ def create_copy(app, output):
         run(['ditto', str(app), str(staged)])
         run(['codesign', '--verify', '--deep', '--strict', str(staged)])
         binary = staged / 'Contents/MacOS/CleanMyMac_5'
-        replacement = patched_bytes(binary.read_bytes(), profile)
+        replacement = inject_adapter(patched_bytes(binary.read_bytes(), profile))
         stat = binary.stat()
         pending = binary.with_name(binary.name + '.pending')
         pending.write_bytes(replacement)
         os.chmod(pending, stat.st_mode & 0o777)
         os.replace(pending, binary)
+        library = staged / 'Contents/Frameworks/CMM5LocalData.dylib'
+        adapter_source = Path(__file__).resolve().parent / 'native/CMM5LocalData.m'
+        run(['clang', '-dynamiclib', '-arch', 'arm64', '-fobjc-arc', '-framework', 'Foundation',
+             str(adapter_source), '-o', str(library)])
+        run(['codesign', '--force', '--sign', '-', '--timestamp=none', str(library)])
         # Restricted vendor entitlements are rejected with an ad-hoc signature.
         # Dropping them permits startup, but does not preserve all functionality.
         run(['codesign', '--force', '--sign', '-', '--timestamp=none', str(staged)])
@@ -63,24 +69,23 @@ def create_copy(app, output):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--app', type=Path, help='Source app; defaults to /Applications/CleanMyMac_5.app')
+    parser.add_argument('--app', type=Path, help='Source app; defaults to /Applications/CleanMyMac.app')
     parser.add_argument('--check', action='store_true', help='Read-only compatibility check (default)')
     parser.add_argument('--json', action='store_true', help='Print the compatibility report as JSON')
-    parser.add_argument('--apply', action='store_true', help='Create a separate experimental app copy')
-    parser.add_argument('--experimental', action='store_true', help='Acknowledge unverified feature behavior')
+    parser.add_argument('--apply', action='store_true', help='Create a separate patched app copy')
     parser.add_argument('--output', type=Path, help='New .app path; existing paths are never replaced')
     args = parser.parse_args(argv)
     if args.check and args.apply:
         parser.error('--check and --apply are mutually exclusive')
-    if args.apply and (not args.experimental or args.output is None):
-        parser.error('--apply requires --experimental and --output /new/path.app')
-    if not args.apply and (args.output is not None or args.experimental):
-        parser.error('--experimental and --output require --apply')
+    if args.apply and args.output is None:
+        parser.error('--apply requires --output /new/path.app')
+    if not args.apply and args.output is not None:
+        parser.error('--output requires --apply')
     try:
         app = find_app(args.app)
         report = inspect_app(app)
         if args.apply:
-            if not report['experimental_preflight_passed']:
+            if not report['preflight_passed']:
                 raise CompatibilityError(report['reason'])
             output = create_copy(app, args.output)
             report.update(output=str(output), signature_check='passed',
@@ -93,10 +98,10 @@ def main(argv=None):
             print('Profile:', report['profile_status'])
             print(report['reason'])
             if args.apply:
-                print('Experimental app copy:', report['output'])
-                print('Vendor entitlements were not retained. Activation, features, and permissions remain unverified.')
+                print('Patched app copy:', report['output'])
+                print('Vendor entitlements were not retained. The copy uses a local data adapter; features remain under test.')
                 print('Source app unchanged. This command does not launch or install over it.')
-        return 0 if report['experimental_preflight_passed'] else 2
+        return 0 if report['preflight_passed'] else 2
     except (CompatibilityError, OSError) as error:
         if args.json:
             print(json.dumps({'error': str(error)}))
